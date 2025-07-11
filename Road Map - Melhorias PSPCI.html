@@ -1,0 +1,619 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Road Map - Melhorias PSPCI</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Custom styles for dark mode only */
+        body {
+            background-image: linear-gradient(to bottom right, #1f2937, #111827);
+        }
+        .transition-all {
+            transition: all 0.3s ease-in-out;
+        }
+        /* Ensure canvas for Chart.js is constrained */
+        #classification-chart {
+            max-height: 300px;
+            overflow-y: hidden;
+        }
+        canvas {
+            max-width: 100%;
+            width: 100%;
+        }
+        /* Custom Drive icon style */
+        .drive-icon {
+            color: #4285f4; /* Google Drive blue */
+        }
+        .drive-icon:hover {
+            color: #357abd; /* Darker blue on hover */
+        }
+    </style>
+</head>
+<body class="min-h-screen font-sans" id="body">
+    <!-- Navigation Bar -->
+    <nav class="shadow-lg p-4 sticky top-0 z-10 bg-gray-900">
+        <div class="max-w-4xl mx-auto flex justify-between items-center">
+            <div class="flex space-x-4">
+                <!-- New Drive Link -->
+                <a href="https://drive.google.com/file/d/1X0pFFvJlNlxg8vOs5e0lou6XC9thfR02/view?usp=sharing" target="_blank" class="px-4 py-2 rounded-full text-lg font-semibold flex items-center gap-2 transition-all bg-gray-700 text-gray-200 hover:bg-gray-600 drive-icon">
+                    <i data-lucide="file" class="w-6 h-6"></i> Reunião Gravada
+                </a>
+                <!-- Existing Navigation Buttons -->
+                <button id="roadmap-btn" class="px-4 py-2 rounded-full text-lg font-semibold flex items-center gap-2 transition-all bg-gray-700 text-gray-200 hover:bg-gray-600">
+                    <i data-lucide="list"></i> Roteiro
+                </button>
+                <button id="dashboard-btn" class="px-4 py-2 rounded-full text-lg font-semibold flex items-center gap-2 transition-all bg-gray-700 text-gray-200 hover:bg-gray-600">
+                    <i data-lucide="bar-chart-2"></i> Dashboard
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Content Area -->
+    <div class="max-w-4xl mx-auto py-8 px-4 sm:px-6 md:px-8" id="content">
+        <!-- Roadmap View -->
+        <div id="roadmap-view" class="hidden">
+            <h1 class="text-3xl sm:text-4xl font-bold mb-6 text-center text-gray-100">Road Map - Melhorias PSPCI</h1>
+            <!-- Filter Section -->
+            <div class="mb-6 rounded-lg shadow-xl p-6 border bg-gray-800 border-gray-700">
+                <h2 class="text-xl font-semibold mb-4 text-gray-100">Filtrar Atividades</h2>
+                <div class="flex flex-wrap gap-4">
+                    <button id="filter-all" class="px-4 py-2 rounded-lg transition-all bg-blue-500 text-white hover:bg-blue-600">Todas as Fases</button>
+                    <button id="filter-phase1" class="px-4 py-2 rounded-lg transition-all bg-indigo-500 text-white hover:bg-indigo-600">Fase 1</button>
+                    <button id="filter-phase2" class="px-4 py-2 rounded-lg transition-all bg-purple-500 text-white hover:bg-purple-600">Fase 2</button>
+                    <button id="filter-phase3" class="px-4 py-2 rounded-lg transition-all bg-pink-500 text-white hover:bg-pink-600">Fase 3</button>
+                </div>
+            </div>
+            <!-- Activities Container -->
+            <div id="activities-container"></div>
+        </div>
+        <!-- Dashboard View -->
+        <div id="dashboard-view" class="hidden">
+            <h1 class="text-3xl sm:text-4xl font-bold mb-8 text-center text-gray-100">Road Map - Melhorias PSPCI</h1>
+            <!-- Overall Progress -->
+            <div class="rounded-lg shadow-xl p-6 mb-8 border bg-gray-800 border-gray-700">
+                <h2 class="text-xl font-semibold mb-4 text-gray-100">Progresso Geral das Atividades</h2>
+                <div class="flex items-center justify-between mb-4">
+                    <span class="text-lg font-medium text-gray-100">Atividades Concluídas:</span>
+                    <span id="progress-text" class="text-2xl font-bold text-green-500">0 de 0</span>
+                </div>
+                <div class="w-full bg-gray-600 rounded-full h-4">
+                    <div id="progress-bar" class="h-4 rounded-full transition-all bg-gradient-to-r from-green-400 to-green-600" style="width: 0%"></div>
+                </div>
+                <p id="progress-percentage" class="text-right mt-2 text-sm text-gray-300">0% Concluído</p>
+            </div>
+            <!-- Activities by Classification Chart -->
+            <div class="rounded-lg shadow-xl p-6 mb-8 border bg-gray-800 border-gray-700 max-h-[350px] overflow-y-auto">
+                <h2 class="text-xl font-semibold mb-4 text-gray-100">Atividades por Classificação</h2>
+                <div class="w-full">
+                    <canvas id="classification-chart" height="300"></canvas>
+                </div>
+            </div>
+            <!-- Phase Progress -->
+            <div class="rounded-lg shadow-xl p-6 mb-8 border bg-gray-800 border-gray-700">
+                <h2 class="text-xl font-semibold mb-4 text-gray-100">Progresso por Fase (Insights de Qualidade)</h2>
+                <div id="phase-progress"></div>
+                <p class="mt-4 text-sm text-gray-300">
+                    O progresso por fase reflete a evolução na implementação das melhorias. Fases com maior percentual de conclusão indicam áreas onde a qualidade e a automação estão sendo aprimoradas mais rapidamente.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Roadmap Data
+        const roadmapData = [
+            {
+                id: 'phase1',
+                title: 'Fase 1: Otimização Essencial e Famílias Críticas (Curto Prazo)',
+                focus: 'Resolver problemas que impactam diretamente a quantificação e o tempo diário de trabalho, garantindo a base para futuras automações.',
+                activities: [
+                    {
+                        id: 'p1a1',
+                        group: 'Famílias e Quantitativos',
+                        name: 'Revisão e Correção da Lista de Materiais no Revit',
+                        problem: 'A lista de materiais gerada no Revit é inadequada (separa itens iguais, não inclui todos os componentes).',
+                        action: 'Corrigir a configuração da lista para que agrupe itens corretamente e inclua todos os componentes necessários.',
+                        classification: 'Ajuste de Template',
+                        completed: false
+                    },
+                    {
+                        id: 'p1a2',
+                        group: 'Famílias e Quantitativos',
+                        name: 'Criação/Busca de Famílias Faltantes',
+                        problem: 'Ausência de famílias para Adaptador para Condulete, Luvas de Conduíte, Reduções Específicas e Alarmes.',
+                        action: 'Desenvolver ou encontrar as famílias necessárias para que esses itens possam ser modelados e quantificados automaticamente.',
+                        classification: 'Ajuste de Família',
+                        completed: false
+                    },
+                    {
+                        id: 'p1a4',
+                        group: 'Automações de Inserção e Propriedades',
+                        name: 'Automação da Inserção de Acoplamentos de Tubos Ranhurados',
+                        problem: 'Inserção manual de acoplamentos a cada 6 metros em tubulações longas.',
+                        action: 'Desenvolver uma rotina para inserir automaticamente os acoplamentos onde a tubulação excede 6 metros.',
+                        classification: 'Automação C#',
+                        completed: false
+                    },
+                    {
+                        id: 'p1a5',
+                        group: 'Automações de Inserção e Propriedades',
+                        name: 'Posicionamento de Válvulas de Hidrante',
+                        problem: 'Válvulas vêm no nível zero e precisam de ajuste manual de altura e lado (esquerda/direita).',
+                        action: 'Ajustar a família da válvula para que já venha na altura correta e com um parâmetro que permita selecionar o lado de forma simples.',
+                        classification: 'Ajuste de Família',
+                        completed: false
+                    },
+                    {
+                        id: 'p1a6',
+                        group: 'Automações de Inserção e Propriedades',
+                        name: 'Duplicação de Materiais (Revit)',
+                        problem: 'Materiais duplicados nos elementos causam lentidão no carregamento das famílias.',
+                        action: 'Aplicar o comando existente para corrigir a duplicação de materiais no template.',
+                        classification: 'Ajuste de Template',
+                        completed: false
+                    },
+                    {
+                        id: 'p1a7',
+                        group: 'Automações de Inserção e Propriedades',
+                        name: 'Configuração de Placas de Sinalização',
+                        problem: 'Placas vêm com distância padrão incorreta (400mm em vez de 1200mm, 800mm ou 100mm) e as configurações não persistem.',
+                        action: 'Ajustar as famílias das placas para que venham com a distância padrão correta e implementar a vinculação automática das placas aos seus respectivos equipamentos (extintores, hidrantes, alarmes).',
+                        classification: 'Ajuste de Família / Automação C#',
+                        completed: false
+                    },
+                    {
+                        id: 'p1a8',
+                        group: 'Automações de Inserção e Propriedades',
+                        name: 'Alinhamento de Bombas no Piso',
+                        problem: 'Bombas não são inseridas alinhadas com o piso, com ponto de inserção na base.',
+                        action: 'Ajustar a família da bomba para que o ponto de inserção seja na base, facilitando o posicionamento.',
+                        classification: 'Ajuste de Família',
+                        completed: false
+                    },
+                    {
+                        id: 'p1a9',
+                        group: 'Automações de Inserção e Propriedades',
+                        name: 'Acionadores de Alarme (Conexões)',
+                        problem: 'Acionadores de alarme possuem apenas um ponto de conexão, dificultando a ligação para pavimentos inferiores.',
+                        action: 'Adicionar um ponto de conexão inferior na família do acionador.',
+                        classification: 'Ajuste de Família',
+                        completed: false
+                    },
+                    {
+                        id: 'p3a4',
+                        group: 'Automações de Inserção e Propriedades',
+                        name: 'Hidrante de Recalque',
+                        problem: 'A válvula do hidrante de recalque vem com a boca para baixo e precisa ser espelhada manualmente.',
+                        action: 'Ajustar a família para que a válvula já venha com a boca voltada para cima e na posição correta dentro da caixa.',
+                        classification: 'Ajuste de Família',
+                        completed: false
+                    },
+                    {
+                        id: 'p3a6',
+                        group: 'Visualização e Análise',
+                        name: 'Análise de Cobertura de Raio Avançada',
+                        problem: 'Apenas visualização simples do raio de cobertura.',
+                        action: 'Desenvolver uma funcionalidade para analisar distâncias entre elementos, considerando obstáculos como portas e paredes, para verificar a cobertura real.',
+                        classification: 'Automação C#',
+                        completed: false
+                    }
+                ]
+            },
+            {
+                id: 'phase2',
+                title: 'Fase 2: Melhorias de Fluxo e Automações Específicas (Médio Prazo)',
+                focus: 'Implementar automações que otimizam tarefas repetitivas e melhoram a visualização e a gestão de dados.',
+                activities: [
+                    {
+                        id: 'p2a1',
+                        group: 'Visualização e Análise',
+                        name: 'Indicação de Raio de Cobertura para Equipamentos',
+                        problem: 'Criação manual de círculos para visualização da área de cobertura de extintores (15m), hidrantes (30m) e luminárias (5m).',
+                        action: 'Implementar um parâmetro nas famílias desses equipamentos para ligar/desligar a visibilidade de um círculo que represente seu raio de cobertura.',
+                        classification: 'Ajuste de Família',
+                        completed: false
+                    },
+                    {
+                        id: 'p2a3',
+                        group: 'Documentação e UI',
+                        name: 'Melhorias na Tabela de Preenchimento para o Corpo de Bombeiros',
+                        problem: 'Alterações na tabela são feitas manualmente em "bolinhas", dificultando a edição.',
+                        action: 'Implementar uma interface mais amigável (ex: listas suspensas, "janelinhas") para a edição dos campos da tabela, baseada nas normas da IT09 de carga de incêndio.',
+                        classification: 'Melhoria de UI/UX / Automação C#',
+                        completed: false
+                    },
+                    {
+                        id: 'p1a3',
+                        group: 'Famílias e Quantitativos',
+                        name: 'Inclusão da Base da Bomba na Lista de Materiais',
+                        problem: 'A base da bomba não é contabilizada na lista de materiais.',
+                        action: 'Garantir que a família da bomba inclua a base e que esta seja quantificada corretamente.',
+                        classification: 'Ajuste de Família',
+                        completed: false
+                    }
+                ]
+            },
+            {
+                id: 'phase3',
+                title: 'Fase 3: Refinamento e Funcionalidades Avançadas (Longo Prazo)',
+                focus: 'Abordar questões mais complexas ou de menor impacto diário, mas que agregam valor a longo prazo e aprimoram a qualidade do projeto.',
+                activities: [
+                    {
+                        id: 'p3a1',
+                        group: 'Documentação e Exportação',
+                        name: 'Automação da Legenda',
+                        problem: 'A criação da legenda é totalmente manual.',
+                        action: 'Desenvolver uma solução automatizada para a geração da legenda do projeto.',
+                        classification: 'Automação C#',
+                        completed: false
+                    },
+                    {
+                        id: 'p3a2',
+                        group: 'Documentação e Exportação',
+                        name: 'Exportação de Imagens para CAD (Raster)',
+                        problem: 'Imagens são exportadas como "raster" para o CAD, exigindo um processo manual de cópia, dimensionamento e colagem.',
+                        action: 'Investigar formatos de imagem que não exijam esse processo manual ou replicar a funcionalidade de plugins que realizam essa conversão.',
+                        classification: 'Análise/Pesquisa / Automação C#',
+                        completed: false
+                    },
+                    {
+                        id: 'p3a3',
+                        group: 'Qualidade e Correção de Bugs',
+                        name: 'Posicionamento de Suportes',
+                        problem: 'Famílias de suporte são difíceis de usar e a colocação é manual.',
+                        action: 'Desenvolver uma automação para a colocação de suportes.',
+                        classification: 'Automação C#',
+                        completed: false
+                    },
+                    {
+                        id: 'p3a5',
+                        group: 'Qualidade e Correção de Bugs',
+                        name: 'Detector de Fumaça/Calor (Simbologia)',
+                        problem: 'Bug na simbologia que faz com que o detector de calor sobreponha o de fumaça ao redimensionar.',
+                        action: 'Corrigir o bug na família da simbologia dos detectores.',
+                        classification: 'Ajuste de Família',
+                        completed: false
+                    },
+                    {
+                        id: 'p1a10',
+                        group: 'Integração Arquitetura-Incêndio',
+                        name: 'Portas Corta-Fogo',
+                        problem: 'Elementos da arquitetura (ex: portas corta-fogo) precisam ser remodelados para representação correta (cor vermelha, texto P60/P90) no projeto de incêndio.',
+                        action: 'Trabalhar com a arquitetura para que as famílias de portas corta-fogo já venham com parâmetros que permitam a correta representação visual e textual (P60/P90) no modelo de incêndio, possivelmente via filtros de vista e tags editáveis.',
+                        classification: 'Integração/Fluxo de Trabalho',
+                        completed: false
+                    },
+                    {
+                        id: 'p2a2',
+                        group: 'Cálculos e Dados',
+                        name: 'Automatização de Cálculos de Vazão e Pressão',
+                        problem: 'Cálculo manual de vazão e pressão para bombas, com contagem manual de comprimentos equivalentes.',
+                        action: 'Avaliar a funcionalidade do plugin Dariva; caso não atenda, desenvolver um formulário integrado ao sistema que capture dados automaticamente do modelo e permita preenchimento manual quando necessário, gerando a memória de cálculo.',
+                        classification: 'Análise/Pesquisa / Automação C#',
+                        completed: false
+                    },
+                    {
+                        id: 'p3a7',
+                        group: 'Visualização e Análise',
+                        name: 'Verificação de Distanciamentos por Raios de Atuação',
+                        problem: 'Verificação manual dos raios de atuação de hidrantes, extintores, placas e outros elementos é trabalhosa e propensa a erros.',
+                        action: 'Desenvolver uma automação em C# que verifique os distanciamentos considerando os raios de atuação de hidrantes (30m), extintores (15m), placas e outros elementos, garantindo conformidade com as normas de segurança.',
+                        classification: 'Automação C#',
+                        completed: false
+                    }
+                ]
+            }
+        ];
+
+        // Helper function for classification tag styles
+        function getClassificationTagStyle(classification) {
+            const base = 'bg-opacity-20 text-opacity-80';
+            switch (classification) {
+                case 'Ajuste de Template': return `${base} bg-yellow-400 text-yellow-300`;
+                case 'Ajuste de Família': return `${base} bg-blue-400 text-blue-300`;
+                case 'Automação C#': return `${base} bg-purple-400 text-purple-300`;
+                case 'Integração/Fluxo de Trabalho': return `${base} bg-red-400 text-red-300`;
+                case 'Análise/Pesquisa / Automação C#': return `${base} bg-orange-400 text-orange-300`;
+                case 'Melhoria de UI/UX / Automação C#': return `${base} bg-teal-400 text-teal-300`;
+                default: return `${base} bg-gray-400 text-gray-300`;
+            }
+        }
+
+        // State management
+        let currentView = 'roadmap';
+        let currentFilter = 'all';
+        let completionStatus = JSON.parse(localStorage.getItem('roadmapCompletionStatus')) || {};
+
+        // Initialize theme (forced dark mode)
+        document.documentElement.classList.add('dark');
+        lucide.createIcons();
+
+        // View switching
+        document.getElementById('roadmap-btn').addEventListener('click', () => {
+            currentView = 'roadmap';
+            updateView();
+        });
+        document.getElementById('dashboard-btn').addEventListener('click', () => {
+            currentView = 'dashboard';
+            updateView();
+        });
+
+        // Filter buttons
+        document.getElementById('filter-all').addEventListener('click', () => {
+            currentFilter = 'all';
+            updateRoadmap();
+            updateFilterButtons();
+        });
+        document.getElementById('filter-phase1').addEventListener('click', () => {
+            currentFilter = 'phase1';
+            updateRoadmap();
+            updateFilterButtons();
+        });
+        document.getElementById('filter-phase2').addEventListener('click', () => {
+            currentFilter = 'phase2';
+            updateRoadmap();
+            updateFilterButtons();
+        });
+        document.getElementById('filter-phase3').addEventListener('click', () => {
+            currentFilter = 'phase3';
+            updateRoadmap();
+            updateFilterButtons();
+        });
+
+        // Update filter button styles
+        function updateFilterButtons() {
+            const buttons = {
+                'all': document.getElementById('filter-all'),
+                'phase1': document.getElementById('filter-phase1'),
+                'phase2': document.getElementById('filter-phase2'),
+                'phase3': document.getElementById('filter-phase3')
+            };
+            Object.keys(buttons).forEach(key => {
+                const btn = buttons[key];
+                if (key === currentFilter) {
+                    btn.className = `px-4 py-2 rounded-lg transition-all ${key === 'all' ? 'bg-blue-700 ring-2 ring-offset-2 ring-blue-500' : key === 'phase1' ? 'bg-indigo-700 ring-2 ring-offset-2 ring-indigo-500' : key === 'phase2' ? 'bg-purple-700 ring-2 ring-offset-2 ring-purple-500' : 'bg-pink-700 ring-2 ring-offset-2 ring-pink-500'} text-white shadow-md`;
+                } else {
+                    btn.className = `px-4 py-2 rounded-lg transition-all ${key === 'all' ? 'bg-blue-500 hover:bg-blue-600' : key === 'phase1' ? 'bg-indigo-500 hover:bg-indigo-600' : key === 'phase2' ? 'bg-purple-500 hover:bg-purple-600' : 'bg-pink-500 hover:bg-pink-600'} text-white`;
+                }
+            });
+        }
+
+        // Update view
+        function updateView() {
+            document.getElementById('roadmap-view').classList.toggle('hidden', currentView !== 'roadmap');
+            document.getElementById('dashboard-view').classList.toggle('hidden', currentView !== 'dashboard');
+            document.getElementById('roadmap-btn').className = `px-4 py-2 rounded-full text-lg font-semibold flex items-center gap-2 transition-all ${currentView === 'roadmap' ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md ring-2 ring-offset-2 ring-blue-500' : 'bg-gray-700 text-gray-200 hover:bg-gray-600'}`;
+            document.getElementById('dashboard-btn').className = `px-4 py-2 rounded-full text-lg font-semibold flex items-center gap-2 transition-all ${currentView === 'dashboard' ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md ring-2 ring-offset-2 ring-purple-500' : 'bg-gray-700 text-gray-200 hover:bg-gray-600'}`;
+            lucide.createIcons();
+            if (currentView === 'roadmap') {
+                updateRoadmap();
+            } else {
+                updateDashboard();
+            }
+        }
+
+        // Update Roadmap View
+        function updateRoadmap() {
+            const container = document.getElementById('activities-container');
+            container.innerHTML = '';
+            roadmapData.forEach(phase => {
+                if (currentFilter !== 'all' && phase.id !== currentFilter) return;
+                const phaseDiv = document.createElement('div');
+                phaseDiv.className = 'rounded-lg shadow-xl p-6 mb-8 border bg-gray-800 border-gray-700';
+                phaseDiv.innerHTML = `
+                    <h2 class="text-2xl font-bold mb-2 text-gray-100">${phase.title}</h2>
+                    <p class="mb-4 text-gray-300">${phase.focus}</p>
+                `;
+                const groupedActivities = phase.activities.reduce((acc, activity) => {
+                    if (!acc[activity.group]) acc[activity.group] = [];
+                    acc[activity.group].push(activity);
+                    return acc;
+                }, {});
+                Object.keys(groupedActivities).forEach(groupName => {
+                    const groupDiv = document.createElement('div');
+                    groupDiv.className = 'mb-6';
+                    groupDiv.innerHTML = `<h3 class="text-xl font-semibold mb-3 ml-4 text-gray-200">${groupName}</h3>`;
+                    groupedActivities[groupName].forEach(activity => {
+                        const activityDiv = document.createElement('div');
+                        activityDiv.className = `relative rounded-lg shadow-md p-4 mb-4 transition-all border-l-4 ${completionStatus[activity.id] ? 'border-green-500 bg-green-900/20' : 'bg-gray-700 border-gray-600'}`;
+                        activityDiv.innerHTML = `
+                            <label for="${activity.id}" class="flex items-start cursor-pointer">
+                                <input type="checkbox" id="${activity.id}" class="mr-3 mt-1 w-5 h-5 accent-green-500 flex-shrink-0" ${completionStatus[activity.id] ? 'checked' : ''}>
+                                <div class="flex-grow">
+                                    <div class="flex items-center">
+                                        <span class="text-xl font-semibold ${completionStatus[activity.id] ? 'text-gray-400 line-through' : 'text-gray-200'}">${activity.name}</span>
+                                        ${completionStatus[activity.id] ? '<i data-lucide="check-circle" class="ml-2 text-green-500" style="width: 20px; height: 20px;"></i>' : ''}
+                                    </div>
+                                    <span class="inline-block text-xs font-medium px-2.5 py-0.5 rounded-full mt-2 ${getClassificationTagStyle(activity.classification)}">${activity.classification}</span>
+                                    <p class="text-sm mt-2 text-gray-300"><strong>Problema:</strong> ${activity.problem}</p>
+                                    <p class="text-sm mt-1 text-gray-300"><strong>Ação:</strong> ${activity.action}</p>
+                                </div>
+                            </label>
+                        `;
+                        groupDiv.appendChild(activityDiv);
+                    });
+                    phaseDiv.appendChild(groupDiv);
+                });
+                container.appendChild(phaseDiv);
+            });
+            // Add checkbox event listeners
+            document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+                checkbox.addEventListener('change', (e) => {
+                    completionStatus[e.target.id] = e.target.checked;
+                    localStorage.setItem('roadmapCompletionStatus', JSON.stringify(completionStatus));
+                    updateRoadmap();
+                    if (currentView === 'dashboard') updateDashboard();
+                });
+            });
+            lucide.createIcons();
+        }
+
+        // Update Dashboard View
+        let chartInstance = null;
+        function updateDashboard() {
+            // Overall Progress
+            const totalActivities = roadmapData.reduce((acc, phase) => acc + phase.activities.length, 0);
+            const completedActivities = roadmapData.reduce((acc, phase) => {
+                return acc + phase.activities.filter(activity => completionStatus[activity.id]).length;
+            }, 0);
+            document.getElementById('progress-text').textContent = `${completedActivities} de ${totalActivities}`;
+            const percentage = (completedActivities / totalActivities * 100).toFixed(1);
+            document.getElementById('progress-bar').style.width = `${percentage}%`;
+            document.getElementById('progress-percentage').textContent = `${percentage}% Concluído`;
+
+            // Classification Chart
+            const classificationCounts = roadmapData.reduce((acc, phase) => {
+                phase.activities.forEach(activity => {
+                    const classifications = activity.classification.split(' / ').map(c => c.trim());
+                    classifications.forEach(cls => {
+                        acc[cls] = (acc[cls] || 0) + 1;
+                    });
+                });
+                return acc;
+            }, {});
+            const chartData = Object.keys(classificationCounts).map(key => ({
+                name: key,
+                count: classificationCounts[key]
+            }));
+            const ctx = document.getElementById('classification-chart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: chartData.map(d => d.name.length > 20 ? d.name.substring(0, 17) + '...' : d.name),
+                    datasets: [{
+                        data: chartData.map(d => d.count),
+                        backgroundColor: '#6366f1',
+                        borderColor: '#4f46e5',
+                        borderWidth: 1,
+                        borderRadius: 5,
+                        barThickness: 30,
+                        maxBarThickness: 40
+                    }]
+                },
+                options: {
+                    maintainAspectRatio: false,
+                    responsive: true,
+                    height: 300,
+                    layout: {
+                        padding: {
+                            left: 10,
+                            right: 30,
+                            top: 10,
+                            bottom: 20
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45,
+                                color: '#cbd5e0',
+                                font: { size: 12 },
+                                padding: 10,
+                                maxTicksLimit: 10
+                            },
+                            grid: { display: false }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: '#cbd5e0',
+                                font: { size: 12 },
+                                stepSize: 1
+                            },
+                            grid: {
+                                color: '#4a5568',
+                                borderDash: [3, 3]
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: '#2d3748',
+                            titleColor: '#ffffff',
+                            bodyColor: '#ffffff',
+                            borderColor: '#4a5568',
+                            borderWidth: 1
+                        }
+                    }
+                }
+            });
+
+            // Phase Progress
+            const phaseProgress = roadmapData.map(phase => {
+                const phaseTotal = phase.activities.length;
+                const phaseCompleted = phase.activities.filter(activity => completionStatus[activity.id]).length;
+                const progressPercentage = phaseTotal > 0 ? (phaseCompleted / phaseTotal) * 100 : 0;
+                return { id: phase.id, title: phase.title, total: phaseTotal, completed: phaseCompleted, percentage: progressPercentage.toFixed(0) };
+            });
+            const phaseProgressDiv = document.getElementById('phase-progress');
+            phaseProgressDiv.innerHTML = phaseProgress.map(phase => `
+                <div class="mb-4">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="font-medium text-gray-100">${phase.title}</span>
+                        <span class="text-sm text-gray-300">${phase.completed} de ${phase.total} (${phase.percentage}%)</span>
+                    </div>
+                    <div class="w-full bg-gray-600 rounded-full h-3">
+                        <div class="h-3 rounded-full transition-all bg-gradient-to-r from-blue-400 to-blue-600" style="width: ${phase.percentage}%"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Initial render
+        updateView();
+        updateFilterButtons();
+    </script>
+</body>
+</html>
